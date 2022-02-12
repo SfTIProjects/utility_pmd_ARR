@@ -1,21 +1,22 @@
 ##########################################################################################################
-# Instructions                                                                                           #
-# 1. create a main folder e.g pmd1                                                                       #
-# 2. create a subfolder where all the library files will be kept e.g. checks_lib                        #
-#   2a. past your customised rules set file into the checks_libs subfolder e.g. pmdrules.xml             #
-# 3. create a subfolders where all the mvn apps will be saved e.g. mvn_app                               #
-# 4. update all the directories in the sbatch script to reflect your current directory                   #
-# 5. run the sbatch script e.g. sbatch s1_mk_multiple_maven_apps_n_move_files_ARR.sl                     #
-# 6. run the sbatch script e.g. sbatch pmdrules.xml                                                      #
+# Script Functionalities:                                                                                #
+# 1. Fetch the Files                                                                                     #
+# 2. Divide the Files equaliy according to the number                                                    #
+# 3. Generate the Maven Applications based on the number of files                                        #
+# 4. delete the initial App.java file created by default                                                 #
+# 5. Update the Pom.xml File to suite                                                                    #
+# 6. add libs e.g. pmdrules.xml file and pmd-bin-* folder                                                #
+#                                                                                                        #
+# Users Instructions:                                                                                    #
+# 1. update all the directories in the sbatch script to reflect your current directory                   #
+# 2. run the sbatch script e.g. sbatch s1_mk_multiple_maven_apps_n_move_files_ARR.sl                     #
 ##########################################################################################################
 
 # Read this Post for runing processis in parallel
 # https://stackoverflow.com/questions/42979271/how-to-run-multiple-instances-of-the-same-python-script-which-uses-subprocess-ca
 # 
 # How to use this program
-# srun python s1_mk_multiple_maven_apps_n_move_files_ARR.py -idx "${SLURM_ARRAY_TASK_ID}" -n 577 -s ../my_codesnippet_analysis/pmdpasscodesnippets_java -pd ../my_codesnippet_analysis/pmd1/mvn_apps -upd -libs ../my_codesnippet_analysis/pmd1/checks_lib -rvaf
-
-# srun python s1_mk_multiple_maven_apps_n_move_files_ARR.py -idx "${SLURM_ARRAY_TASK_ID}" -n 577 -s ../my_codesnippet_analysis/codesnippets_java -crd ../my_codesnippet_analysis/pmd1 -ucrd -pd mvn_apps -upd -libs checks_lib -rvaf
+#srun python s1_mk_multiple_maven_apps_n_move_files_ARR.py -idx "${SLURM_ARRAY_TASK_ID}" -n 577 -s ../../../../stackexchange_v2/workspace/input/codesnippets_java -crd ../my_codesnippet_analysis/pmd -ucrd -pd mvn_apps -upd -sld libs -pxr pmdrules.xml -lfrp pmd-bin-* -ilfr -rvaf
 
 # Change the data source -s
 # ../../../../stackexchange_v2/workspace/input/codesnippets_csv
@@ -24,12 +25,7 @@
 # $    sbatch s1_mk_multiple_maven_apps_n_move_files_ARR.sl 
 
 
-# Fetch the Files 
-# Divide the Files equaliy according to the number
-# Generate the Maven Applications based on the number of files
-# delete the initial App.java file created by default
-# Update the Pom.xml File to suite
-# add google check.xml
+
 
 
 import subprocess as sp
@@ -96,7 +92,7 @@ parser.add_argument(
     action="store_true",
     help="Use common root directory"
 )
-#e.g. ../my_codesnippet_analysis/pmd1
+#e.g. ../my_codesnippet_analysis/pmd
 parser.add_argument(
     "-crd",
     "--commonrootdir",
@@ -110,7 +106,7 @@ parser.add_argument(
      help="Agree to use parent destination"   
 )
 
-#e.g. ../my_codesnippet_analysis/pmd1/mvn_apps
+#e.g. ../my_codesnippet_analysis/pmd/mvn_apps
 parser.add_argument(
     "-pd",
     "--parentdest",
@@ -193,17 +189,44 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "-pru",
-    "--pmdxmlrules", 
-    default="pmdrules.xml",
+    "-pxr",
+    "--pmdxmlrule", 
+    type=str,
+    help="Enter the rule full name plus extension to be auto included in the root directory where the pom.xml is located)."
+)
+
+parser.add_argument(
+    "-ilf",
+    "--importlibfile",
+    action="store_true",
+    help="Do you need to import other library files otherthan the one specified in the pmdxmlrule"
+)
+
+parser.add_argument(
+    "-lfp",
+    "--libfilepattern", 
     type=str,
     help="Enter the full name of the checks file plus extension (default is the pmdrules.xml which will be auto included in the root directory where the pom.xml is located)."
 )
 
-# e.g. checks_lib
 parser.add_argument(
-    "-libs",
-    "--libdir", 
+    "-ilfr",
+    "--importlibfolder",
+    action="store_true",
+    help="Do you need to import other library folders"
+)
+
+parser.add_argument(
+    "-lfrp",
+    "--libfolderpattern", 
+    type=str,
+    help="Enter the full name of the checks file plus extension (default is the pmdrules.xml which will be auto included in the root directory where the pom.xml is located)."
+)
+
+# e.g. libs
+parser.add_argument(
+    "-sld",
+    "--sourcelibdir", 
     default="",
     type=str,
     help="Enter the path to copy the checks file from."
@@ -240,8 +263,12 @@ compiler_source_tagret = args.compilersourcetarget
 #puppy_version = args.puppyversion
 maven_pmd_plugin_version = args.mavenpmdpluginversion
 maven_pmd_plugin = args.mavenpmdplugin
-pmd_xml_rules = args.pmdxmlrules
-lib_path = args.libdir
+pmd_xml_rules = args.pmdxmlrule
+imp_lib_files = args.importlibfile
+lib_files_patt = args.libfilepattern
+imp_lib_folder = args.importlibfolder
+lib_folder_patt = args.libfolderpattern
+lib_path = args.sourcelibdir
 
 pkg_name_full=java_pkg
 app_name_partial=java_app
@@ -307,6 +334,25 @@ def update_pom_xml(
     # <build><pluginManagement><plugins>
     plugins = pluginManagement[0]
 
+    # <build><pluginManagement><plugins><plugin>
+    plugin = plugins.makeelement('plugin', attrib)
+    plugins.append(plugin)
+
+    # <build><pluginManagement><plugins><plugin><groupId>
+    groupId = plugin.makeelement('groupId', attrib)
+    groupId.text = 'org.apache.maven.plugins'
+    plugin.append(groupId)
+    
+    # <build><pluginManagement><plugins><plugin><artifactId>
+    artifactId = plugin.makeelement('artifactId', attrib)
+    artifactId.text = 'maven-jxr-plugin'
+    plugin.append(artifactId)
+    
+    # <build><pluginManagement><plugins><plugin><version>
+    version = plugin.makeelement('version', attrib)
+    version.text = '3.1.1'
+    plugin.append(version)
+    
     # <build><pluginManagement><plugins><plugin>
     plugin = plugins.makeelement('plugin', attrib)
     plugins.append(plugin)
@@ -430,6 +476,25 @@ def update_pom_xml(
     plugin = plugins.makeelement('plugin', attrib)
     plugins.append(plugin)
 
+    # <build><pluginManagement><plugins><plugin><groupId>
+    groupId = plugin.makeelement('groupId', attrib)
+    groupId.text = 'org.apache.maven.plugins'
+    plugin.append(groupId)
+    
+    # <build><pluginManagement><plugins><plugin><artifactId>
+    artifactId = plugin.makeelement('artifactId', attrib)
+    artifactId.text = 'maven-jxr-plugin'
+    plugin.append(artifactId)
+    
+    # <build><pluginManagement><plugins><plugin><version>
+    version = plugin.makeelement('version', attrib)
+    version.text = '3.1.1'
+    plugin.append(version)
+    
+    #<reporting><plugins><plugin>
+    plugin = plugins.makeelement('plugin', attrib)
+    plugins.append(plugin)
+
     #<reporting><plugins><plugin><groupId>
     groupId = plugin.makeelement('groupId', attrib)
     groupId.text = 'org.apache.maven.plugins'
@@ -492,45 +557,45 @@ def create_mvn_app_n_copy_multiple_java_files_to_analyse():
     #e.g. my-javacodeanalysis-app0
     app_name_full_dest_path = app_name_full
     
-    #e.g., ../my_codesnippet_analysis/pmd1/mvn_apps
+    #e.g., ../my_codesnippet_analysis/pmd/mvn_apps
     #or mvn_apps
     parent_dest_full_path = parent_dest_path
     
-    #e.g., ../my_codesnippet_analysis/pmd1/checks_lib
-    #or checks_lib
+    #e.g., ../my_codesnippet_analysis/pmd/libs
+    #or libs
     lib_full_path = '{}/{}'.format(parent_dest_full_path, lib_path)
     
     
     if use_comm_root_dir == True and use_parent_dest_path == True:
-        #e.g., ../my_codesnippet_analysis/pmd1/mvn_apps/
+        #e.g., ../my_codesnippet_analysis/pmd/mvn_apps/
         parent_dest_full_path = '{}/{}'.format(comm_root_dir, parent_dest_path)
-        #e.g., ../my_codesnippet_analysis/pmd1/checks_lib
+        #e.g., ../my_codesnippet_analysis/pmd/libs
         lib_full_path = '{}/{}'.format(comm_root_dir, lib_path)
-        #e.g., ../my_codesnippet_analysis/pmd1/mvn_apps/my-javacodeanalysis-app0
+        #e.g., ../my_codesnippet_analysis/pmd/mvn_apps/my-javacodeanalysis-app0
         app_name_full_dest_path = '{}/{}/{}'.format(comm_root_dir, parent_dest_path, app_name_full)
         
     elif use_comm_root_dir == True:
-        #e.g., ../my_codesnippet_analysis/pmd1/mvn_apps
+        #e.g., ../my_codesnippet_analysis/pmd/mvn_apps
         parent_dest_full_path = comm_root_dir
-        #e.g., ../my_codesnippet_analysis/pmd1/checks_lib
+        #e.g., ../my_codesnippet_analysis/pmd/libs
         lib_full_path = '{}/{}'.format(comm_root_dir, lib_path)
-        #e.g., ../my_codesnippet_analysis/pmd1/mvn_apps/my-javacodeanalysis-app0
+        #e.g., ../my_codesnippet_analysis/pmd/mvn_apps/my-javacodeanalysis-app0
         app_name_full_dest_path = '{}/{}'.format(comm_root_dir, app_name_full)
         
     elif use_parent_dest_path == True:
-        #e.g., ../my_codesnippet_analysis/pmd1/mvn_apps/my-javacodeanalysis-app0
+        #e.g., ../my_codesnippet_analysis/pmd/mvn_apps/my-javacodeanalysis-app0
         app_name_full_dest_path = '{}/{}'.format(parent_dest_path, app_name_full)
         
         
-    #e.g., ../my_codesnippet_analysis/pmd1/mvn_apps/my-javacodeanalysis-app0/src/main/java
+    #e.g., ../my_codesnippet_analysis/pmd/mvn_apps/my-javacodeanalysis-app0/src/main/java
     app_name_full_child_dest_path = '{}/{}'.format(app_name_full_dest_path, child_dest_path)
-    #e.g., ../my_codesnippet_analysis/pmd1/mvn_apps/my-javacodeanalysis-app0/src/main/java/myjavacodeanalysis
+    #e.g., ../my_codesnippet_analysis/pmd/mvn_apps/my-javacodeanalysis-app0/src/main/java/myjavacodeanalysis
     app_name_full_child_dest_path_pkg = '{}/{}'.format(app_name_full_child_dest_path, java_pkg)
     
     # Rename app if this is true
     if rm_auto_gen_file == True:
         # remove existing directory if they already exist
-        #remove_dir_if_exist_cmd = 'cd ../my_codesnippet_analysis/pmd1/mvn_apps/; rm -rf my-javacodeanalysis-app0
+        #remove_dir_if_exist_cmd = 'cd ../my_codesnippet_analysis/pmd/mvn_apps/; rm -rf my-javacodeanalysis-app0
         remove_dir_if_exist_cmd = 'cd {}; rm -rf {}'.format(parent_dest_full_path, app_name_full)
         cmd1 = sp.run(
             remove_dir_if_exist_cmd, # command
@@ -541,7 +606,7 @@ def create_mvn_app_n_copy_multiple_java_files_to_analyse():
        
     
     # create mvn app 
-    #maven_app_cmd = 'cd ../my_codesnippet_analysis/pmd1/mvn_apps/; mvn archetype:generate -DgroupId=myjavacodeanalysis -DartifactId=my-javacodeanalysis-app0 -DarchetypeArtifactId=maven-archetype-quickstart -DarchetypeVersion=1.4 -DinteractiveMode=false'
+    #maven_app_cmd = 'cd ../my_codesnippet_analysis/pmd/mvn_apps/; mvn archetype:generate -DgroupId=myjavacodeanalysis -DartifactId=my-javacodeanalysis-app0 -DarchetypeArtifactId=maven-archetype-quickstart -DarchetypeVersion=1.4 -DinteractiveMode=false'
     maven_app_cmd = 'cd {}; mvn archetype:generate -DgroupId={} -DartifactId={} -DarchetypeArtifactId=maven-archetype-quickstart -DarchetypeVersion=1.4 -DinteractiveMode=false'.format(parent_dest_full_path, pkg_name_full, app_name_full)
     cmd2 = sp.run(
         maven_app_cmd, # command
@@ -554,7 +619,7 @@ def create_mvn_app_n_copy_multiple_java_files_to_analyse():
     update_pom_xml(app_name_full_dest_path)
     
     # format the pom.xml file and put the result in pom_fmt.xml  
-    #e.g., fmt_pom_xml_cmd = 'cd ../my_codesnippet_analysis/pmd1/mvn_appsa/my-javacodeanalysis-app0; xmllint --format pom.xml > pom_fmt.xml'
+    #e.g., fmt_pom_xml_cmd = 'cd ../my_codesnippet_analysis/pmd/mvn_appsa/my-javacodeanalysis-app0; xmllint --format pom.xml > pom_fmt.xml'
     fmt_pom_xml_cmd = 'cd {}; xmllint --format pom.xml > pom_fmt.xml'.format(app_name_full_dest_path)
     cmd4 = sp.run(
         fmt_pom_xml_cmd, # command
@@ -564,7 +629,7 @@ def create_mvn_app_n_copy_multiple_java_files_to_analyse():
     )
     
     #remove the pom.xml file 
-     #e.g., rv_pom_xml_cmd = 'cd ../my_codesnippet_analysis/pmd1/mvn_appsa/my-javacodeanalysis-app0; rm pom.xml'
+     #e.g., rv_pom_xml_cmd = 'cd ../my_codesnippet_analysis/pmd/mvn_appsa/my-javacodeanalysis-app0; rm pom.xml'
     rm_pom_xml_cmd = 'cd {}; rm pom.xml'.format(app_name_full_dest_path)
     cmd5 = sp.run(
         rm_pom_xml_cmd, # command
@@ -574,7 +639,7 @@ def create_mvn_app_n_copy_multiple_java_files_to_analyse():
     )
     
     #rename the pom_fmt.xml to pom.xml file
-     #e.g., rm_pom_xml_cmd = 'cd ../my_codesnippet_analysis/pmd1/mvn_appsa/my-javacodeanalysis-app0; mv pom_fmt.xml pom.xml'
+     #e.g., rm_pom_xml_cmd = 'cd ../my_codesnippet_analysis/pmd/mvn_appsa/my-javacodeanalysis-app0; mv pom_fmt.xml pom.xml'
     mv_pom_xml_cmd = 'cd {}; mv pom_fmt.xml pom.xml'.format(app_name_full_dest_path)
     cmd6 = sp.run(
         mv_pom_xml_cmd, # command
@@ -583,22 +648,46 @@ def create_mvn_app_n_copy_multiple_java_files_to_analyse():
         shell=True
     )
     
-    # Copy the 'pmdrules.xml' from the check_lib to the root dir of app 
-    #cp_checks_xml_cmd = 'cp checks_lib/pmdrules.xml ../my_codesnippet_analysis/pmd1/mvn_appsa/my-javacodeanalysis-app0'
-    cp_checks_xml_cmd = 'cp {}/{} {}'.format(lib_full_path, pmd_xml_rules, app_name_full_dest_path)
+    # Copy the 'pmdrules.xml' from the libs to the root dir of app 
+    #cp_rule_cheks_xml_cmd = 'cp libs/pmdrules.xml ../my_codesnippet_analysis/pmd/mvn_appsa/my-javacodeanalysis-app0'
+    cp_rule_cheks_xml_cmd = 'cp {}/{} {}'.format(lib_full_path, pmd_xml_rules, app_name_full_dest_path)
     
     cmd7 = sp.run(
-        cp_checks_xml_cmd, # command
+        cp_rule_cheks_xml_cmd, # command
         capture_output=True,
         text=True,
         shell=True
     )
     
+    if imp_lib_files:
+        # Copy other libs files you may need from the libs to the root dir of app 
+        #cp_lib_files_cmd = 'cp libs/otherpmdlibs.xml ../my_codesnippet_analysis/pmd/mvn_appsa/my-javacodeanalysis-app0'
+        cp_lib_files_cmd = 'cp {}/{} {}'.format(lib_full_path, lib_files_patt, app_name_full_dest_path)
+
+        cmd8 = sp.run(
+            cp_lib_files_cmd, # command
+            capture_output=True,
+            text=True,
+            shell=True
+        )
+        
+    if imp_lib_folder:
+        # Copy the other lib folders you may need from the libs to the root dir of app 
+        #cp_lib_folder_cmd = 'cp -r libs/pmd-bin-* ../my_codesnippet_analysis/pmd/mvn_appsa/my-javacodeanalysis-app0'
+        cp_lib_folder_cmd = 'cp -r {}/{} {}'.format(lib_full_path, lib_folder_patt, app_name_full_dest_path)
+
+        cmd9 = sp.run(
+            cp_lib_folder_cmd, # command
+            capture_output=True,
+            text=True,
+            shell=True
+        )
+        
      
     # Delete the App.java file that is created by default from src/main/java/yourpkgdir
-    #e.g., rv_def_java_app_file_cmd = 'rm ../my_codesnippet_analysis/pmd1/mvn_apps/my-javacodeanalysis-app0/src/main/java/myjavacodeanalysis/App.java'
+    #e.g., rv_def_java_app_file_cmd = 'rm ../my_codesnippet_analysis/pmd/mvn_apps/my-javacodeanalysis-app0/src/main/java/myjavacodeanalysis/App.java'
     rm_def_java_app_file_cmd = 'rm {}/{}'.format(app_name_full_child_dest_path_pkg, auto_gen_file_rm)
-    cmd8 = sp.run(
+    cmd10 = sp.run(
         rm_def_java_app_file_cmd, # command
         capture_output=True,
         text=True,
@@ -608,7 +697,7 @@ def create_mvn_app_n_copy_multiple_java_files_to_analyse():
     # Copy or Move source code files
     filenames_array_id = split_filenames[int(array_id)]
     print('Array Id: {} Number of files: {}'.format(array_id, len(filenames_array_id)))
-    #e.g dest_dir = '../my_codesnippet_analysis/pmd1/mvn_apps/my-javacodeanalysis-app0/src/main/java/myjavacodeanalysis'
+    #e.g dest_dir = '../my_codesnippet_analysis/pmd/mvn_apps/my-javacodeanalysis-app0/src/main/java/myjavacodeanalysis'
     dest_dir = '{}'.format(app_name_full_child_dest_path_pkg)
     if mv_src == True:
         #move a list of file from source to dest
